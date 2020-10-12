@@ -82,7 +82,7 @@ class Soft_Attention(nn.Module):
         return attention_weighted_encoding, alpha
 
 
-class DecoderWithAttention(nn.Module):
+class DecoderStuctureWithAttention(nn.Module):
     """
     Decoder.
     """
@@ -96,7 +96,7 @@ class DecoderWithAttention(nn.Module):
         :param encoder_dim: feature size of encoded images
         :param dropout: dropout
         """
-        super(DecoderWithAttention, self).__init__()
+        super(DecoderStuctureWithAttention, self).__init__()
 
         self.encoder_dim = encoder_dim
         self.attention_dim = attention_dim
@@ -190,7 +190,7 @@ class DecoderWithAttention(nn.Module):
         # (batch_size, max_caption_length, embed_dim)
         embeddings = self.embedding(encoded_captions)
 
-        # Initialize LSTM state
+        # Initialize LSTM structure state
         h, c = self.init_hidden_state(encoder_out)  # (batch_size, decoder_dim)
 
         # We won't decode at the <end> position, since we've finished generating as soon as we generate <end>
@@ -215,6 +215,131 @@ class DecoderWithAttention(nn.Module):
             attention_weighted_encoding = gate * attention_weighted_encoding
             h, c = self.decode_step(
                 torch.cat([embeddings[:batch_size_t, t, :],
+                           attention_weighted_encoding], dim=1),
+                (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
+            preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
+            predictions[:batch_size_t, t, :] = preds
+            alphas[:batch_size_t, t, :] = alpha
+
+        return predictions, encoded_captions, decode_lengths, alphas, sort_ind
+
+
+class DecoderCellPerImageWithAttention(nn.Module):
+    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5, batch_size=10):
+        """
+        :param attention_dim: size of attention network
+        :param embed_dim: embedding size
+        :param decoder_dim: size of decoder's RNN
+        :param vocab_size: size of vocabulary
+        :param encoder_dim: feature size of encoded images
+        :param dropout: dropout
+        """
+        super(DecoderCellPerImageWithAttention, self).__init__()
+
+        self.encoder_dim = encoder_dim
+        self.attention_dim = attention_dim
+        self.embed_dim = embed_dim
+        self.decoder_dim = decoder_dim
+        self.vocab_size = vocab_size
+        self.dropout = dropout
+
+        self.attention = Soft_Attention(
+            encoder_dim, decoder_dim, attention_dim)  # attention network
+
+        self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
+        self.dropout = nn.Dropout(p=self.dropout)
+        self.decode_step = nn.LSTMCell(
+            embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding LSTMCell
+        # linear layer to find initial hidden state of LSTMCell
+        self.init_h = nn.Linear(encoder_dim, decoder_dim)
+        # linear layer to find initial cell state of LSTMCell
+        self.init_c = nn.Linear(encoder_dim, decoder_dim)
+
+        # linear layer to create a sigmoid-activated gate
+        self.f_beta = nn.Linear(decoder_dim, encoder_dim)
+        self.sigmoid = nn.Sigmoid()
+        # linear layer to find scores over vocabulary
+        self.fc = nn.Linear(decoder_dim, vocab_size)
+        self.batch_size = batch_size
+        self.init_weights()  # initialize some layers with the uniform distribution
+
+    def load_pretrained_embeddings(self, embeddings):
+        """
+        Loads embedding layer with pre-trained embeddings.
+
+        :param embeddings: pre-trained embeddings
+        """
+        self.embedding.weight = nn.Parameter(embeddings)
+
+    def fine_tune_embeddings(self, fine_tune=True):
+        """
+        Allow fine-tuning of embedding layer? (Only makes sense to not-allow if using pre-trained embeddings).
+
+        :param fine_tune: Allow?
+        """
+        for p in self.embedding.parameters():
+            p.requires_grad = fine_tune
+
+    def init_hidden_state(self, encoder_out):
+        """
+        Creates the initial hidden and cell states for the decoder's LSTM based on the encoded images.
+
+        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim)
+        :return: hidden state, cell state
+        """
+        mean_encoder_out = encoder_out.mean(dim=1)
+        h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
+        c = self.init_c(mean_encoder_out)
+        return h, c
+
+    def forward(self, encoder_out, encoded_captions, caption_lengths, hidden_state_structures):
+        encoder_out = encoder_out.repeat(batch_size, 1)
+        encoder_dim = encoder_out.size(-1)
+        vocab_size = self.vocab_size
+
+        # Flatten image
+        # (batch_size, num_pixels, encoder_dim)
+        encoder_out = encoder_out.view(batch_size, -1, encoder_dim)
+        num_pixels = encoder_out.size(1)
+
+        # Sort input data by decreasing lengths; why? apparent below
+        caption_lengths, sort_ind = caption_lengths.squeeze(
+            1).sort(dim=0, descending=True)
+        encoder_out = encoder_out[sort_ind]
+        encoded_captions = encoded_captions[sort_ind]
+        # hidden_state_structures size (batch_size, decoder_dim)
+        hidden_state_structures = hidden_state_structures[sort_ind]
+
+        # Initialize LSTM cell state
+        #size is (batch_size, decoder_dim)
+        h, c = self.init_hidden_state(encoder_out)
+
+        # append hidden state from structure when decoding <td> or > to attention
+
+        # We won't decode at the <end> position, since we've finished generating as soon as we generate <end>
+        # So, decoding lengths are actual lengths - 1
+        decode_lengths = (caption_lengths - 1).tolist()
+
+        # Create tensors to hold word predicion scores and alphas
+        predictions = torch.zeros(batch_size, max(
+            decode_lengths), vocab_size).to(device)
+        alphas = torch.zeros(batch_size, max(
+            decode_lengths), num_pixels).to(device)
+
+        # decode with time step
+        # attention-weighing the encoder's output based on the decoder's previous hidden state output
+        for t in range(max(decode_lengths)):
+            batch_size_t = sum([l > t for l in decode_lengths])
+            attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],
+                                                                h[:batch_size_t])
+            # gating scalar, (batch_size_t, encoder_dim)
+            gate = self.sigmoid(self.f_beta(h[:batch_size_t]))
+            attention_weighted_encoding = gate * attention_weighted_encoding
+
+            # concat hidden state structure + attention_weighted_encoding
+            attention_weighted_encoding += hidden_state_structures[:batch_size_t]
+            h, c = self.decode_step(
+                torch.cat([self.embeddings[:batch_size_t, t, :],
                            attention_weighted_encoding], dim=1),
                 (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
             preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
