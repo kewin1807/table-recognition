@@ -9,13 +9,14 @@ from collections import Counter
 from random import seed, choice, sample
 import jsonlines
 
+
 width_image = 512
 height_image = 512
 
 
-def create_input_files(dataset, json_file_path, image_folder="examples/", output_folder="ouput",
+def create_input_files(json_file_path, image_folder="examples/examples", output_folder="output",
                        max_len_token_structure=300,
-                       max_len_token_cell=100, width_image=512,
+                       max_len_token_cell=130, width_image=512,
                        height_image=512):
     """
     Creates input files for training, validation, and test data.
@@ -31,6 +32,8 @@ def create_input_files(dataset, json_file_path, image_folder="examples/", output
     # Read Karpathy JSON
     with jsonlines.open('examples/PubTabNet_Examples.jsonl', 'r') as reader:
         imgs = list(reader)
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
 
     # Read image paths and captions for each image
     train_image_captions_structure = []
@@ -102,6 +105,8 @@ def create_input_files(dataset, json_file_path, image_folder="examples/", output
                                                           (valid_image_paths, valid_image_captions_structure,
                                                            valid_image_captions_cells, 'val'),
                                                           (test_image_paths, test_image_captions_structure, test_image_captions_cells, 'test')]:
+        if len(imcaps_structure) == 0:
+            continue
         with h5py.File(os.path.join(output_folder, split + '_IMAGES_.hdf5'), 'a') as h:
             images = h.create_dataset(
                 'images', (len(impaths), 3, width_image, height_image), dtype='uint8')
@@ -110,6 +115,9 @@ def create_input_files(dataset, json_file_path, image_folder="examples/", output
             enc_captions_cells = []
             cap_structure_len = []
             cap_cell_len = []
+            number_cell_per_images = []
+            max_cells_per_images = max(
+                [len(imcaps_cell[i]) for i in range(len(imcaps_cell))])
             for i, path in enumerate(tqdm(impaths)):
                 captions_structure = imcaps_structure[i]
                 captions_cell = imcaps_cell[i]
@@ -130,12 +138,31 @@ def create_input_files(dataset, json_file_path, image_folder="examples/", output
                     c_len = len(c) + 2
                     enc_captions_structure.append(enc_c)
                     cap_structure_len.append(c_len)
+                # for each img have many cell captions
+                each_enc_captions_cell = []
+                each_cap_cell_len = []
                 for j, c in enumerate(captions_cell):
                     enc_c = [word_map_cell['<start>']] + [word_map_cell.get(word, word_map_cell['<unk>']) for word in c] + [
                         word_map_cell['<end>']] + [word_map_cell['<pad>']] * (max_len_token_cell - len(c))
                     c_len = len(c) + 2
-                    enc_captions_cells.append(enc_c)
-                    cap_cell_len.append(c_len)
+                    each_enc_captions_cell.append(enc_c)
+
+                    each_cap_cell_len.append(c_len)
+                # padding cell colection to (max_cells_per_images, max_len_token_cell+2)
+                padding_enc_caption_cell = [
+                    [0 for y in range(max_len_token_cell+2)] for x in range(max_cells_per_images - len(each_enc_captions_cell))]
+
+                padding_len_caption_cell = [0 for x in range(
+                    max_cells_per_images - len(each_enc_captions_cell))]
+
+                each_enc_captions_cell += padding_enc_caption_cell
+                each_cap_cell_len += padding_len_caption_cell
+
+                # save encoding cell in per image
+                enc_captions_cells.append(each_enc_captions_cell)
+                cap_cell_len.append(each_cap_cell_len)
+                number_cell_per_images.append(len(captions_cell))
+
             with open(os.path.join(output_folder, split + '_CAPTIONS_STRUCTURE' + '.json'), 'w') as j:
                 json.dump(enc_captions_structure, j)
             with open(os.path.join(output_folder, split + '_CAPLENS_STRUCTURE' + '.json'), 'w') as j:
@@ -144,6 +171,8 @@ def create_input_files(dataset, json_file_path, image_folder="examples/", output
                 json.dump(enc_captions_cells, j)
             with open(os.path.join(output_folder, split + '_CAPLENS_CELL' + '.json'), 'w') as j:
                 json.dump(cap_cell_len, j)
+            with open(os.path.join(output_folder, split + '_NUMBER_CELLS_PER_IMAGE' + '.json'), 'w') as j:
+                json.dump(number_cell_per_images, j)
 
 
 def init_embedding(embeddings):

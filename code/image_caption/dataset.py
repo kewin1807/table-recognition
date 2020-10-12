@@ -3,6 +3,7 @@ from torch.utils.data import Dataset
 import h5py
 import json
 import os
+import numpy as np
 
 
 class CaptionDataset(Dataset):
@@ -38,12 +39,19 @@ class CaptionDataset(Dataset):
         # Load caption cell length
         with open(os.path.join(data_folder, self.split + '_CAPLENS_CELL' + '.json'), 'r') as j:
             self.caplens_cell = json.load(j)
+        with open(os.path.join(data_folder, self.split + "_NUMBER_CELLS_PER_IMAGE.json"), "r") as j:
+            self.number_cell_per_images = json.load(j)
 
-        # PyTorch transformation pipeline for the image (normalizing, etc.)
+            # PyTorch transformation pipeline for the image (normalizing, etc.)
         self.transform = transform
 
         # Total number of data image
         self.dataset_size = len(self.captions_structure)
+        print(len(self.captions_structure) == len(self.captions_cell))
+
+        print(len(self.caplens_cell) == len(self.caplens_structure))
+
+        print(len(self.captions_structure) == len(self.caplens_structure))
 
     def __getitem__(self, i):
         # Remember, the Nth caption structure corresponds to the Nth image
@@ -55,11 +63,15 @@ class CaptionDataset(Dataset):
 
         caplen_structure = torch.LongTensor([self.caplens_structure[i]])
 
+        print(np.array(self.captions_cell[i]).shape)
         captions_cell = torch.LongTensor(self.captions_cell[i])
 
         caplen_cell = torch.LongTensor(self.caplens_cell[i])
 
-        return img, caption_structure, caplen_structure, captions_cell, caplen_cell
+        number_cell_per_image = torch.LongTensor(
+            [self.number_cell_per_images[i]])
+
+        return img, caption_structure, caplen_structure, captions_cell, caplen_cell, number_cell_per_image
 
         # if self.split is 'TRAIN':
         #     return img, caption, caplen
@@ -71,3 +83,5 @@ class CaptionDataset(Dataset):
 
     def __len__(self):
         return self.dataset_size
+
+# class CaptionCellPerImage(Dataset):
