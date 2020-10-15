@@ -175,6 +175,21 @@ def create_input_files(json_file_path, image_folder="examples/examples", output_
                 json.dump(number_cell_per_images, j)
 
 
+def id_to_word(vocabluary):
+    id2word = {value: key for key, value in vocabluary.items()}
+    return id2word
+
+
+def init_embedding(embeddings):
+    """
+    Fills embedding tensor with values from the uniform distribution.
+
+    :param embeddings: embedding tensor
+    """
+    bias = np.sqrt(3.0 / embeddings.size(1))
+    torch.nn.init.uniform_(embeddings, -bias, bias)
+
+
 def init_embedding(embeddings):
     """
     Fills embedding tensor with values from the uniform distribution.

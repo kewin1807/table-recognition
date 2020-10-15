@@ -42,7 +42,7 @@ checkpoint = None  # path to checkpoint, None if none
 
 
 def main():
-    global checkpoint
+    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement
     word_map_structure_file = os.path.join(
         data_folder, "WORDMAP_STRUCTURE.json")
     word_map_cell_file = os.path.join(data_folder, "WORDMAP_CELL.json")
@@ -56,8 +56,7 @@ def main():
         decoder_structure = DecoderStuctureWithAttention(attention_dim=attention_dim,
                                                          embed_dim=emb_dim,
                                                          decoder_dim=decoder_dim,
-                                                         vocab_size=len(
-                                                             word_map_structure),
+                                                         vocab=word_map_structure,
                                                          dropout=dropout)
         decoder_cell = DecoderCellPerImageWithAttention(
             attention_dim=attention_dim, embed_dim=emb_dim, decoder_dim=decoder_dim, vocab_size=len(word_map_cell), dropout=0.2)
@@ -105,9 +104,9 @@ def main():
         CaptionDataset(data_folder, 'train',
                        transform=transforms.Compose([normalize])), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
-    val = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, 'val',
-                       transform=transforms.Compose([normalize])), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+    # val = torch.utils.data.DataLoader(
+    #     CaptionDataset(data_folder, 'val',
+    #                    transform=transforms.Compose([normalize])), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
     # train foreach epoch
     for epoch in range(start_epoch, epochs):
@@ -130,7 +129,7 @@ def main():
               epoch=epoch)
 
 
-def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, encoder_optimizer, decoder_structure_optimizer, decoder_cell_optimizer):
+def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, encoder_optimizer, decoder_structure_optimizer, decoder_cell_optimizer, epoch):
 
     decoder_structure.train()
     decoder_cell.train()
@@ -148,5 +147,31 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, enc
 
         # Foward encoder image and decoder structure
         imgs = encoder(imgs)
-        scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder_structure(
+        scores, caps_sorted, decode_lengths, alphas, hidden_states, sort_ind = decoder_structure(
             imgs, caption_structures, caplen_structures)
+
+        # decoder cell per image
+        for (i, ind) in enumerate(sort_ind):
+            print("ind: ", ind)
+            img = imgs[ind]
+            hidden_state_structures = hidden_states[i]
+            hidden_state_structures = torch.stack(hidden_state_structures)
+            number_cell_per_image = number_cell_per_images[ind].numpy()[0]
+
+            caption_cell = caption_cells[ind][:number_cell_per_image]
+            caplen_cell = caplen_cells[ind][:number_cell_per_image]
+            caption_cell = caption_cell.to(device)
+            caplen_cell = caplen_cell.to(device)
+
+            # Foward encoder image and decoder cell per image
+            scores_cell, caps_sorted_cell, decode_lengths_cell, alphas, sort_ind = decoder_cell(
+                img, caption_cell, caplen_cell, hidden_state_structures, number_cell_per_image)
+
+            print(caps_sorted_cell.size())
+
+            # print("scores: ", scores)
+            # print("size of scores: ", scores.size())
+
+
+if __name__ == "__main__":
+    main()

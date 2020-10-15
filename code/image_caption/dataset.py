@@ -18,7 +18,7 @@ class CaptionDataset(Dataset):
         :param transform: image transform pipeline
         """
         self.split = split
-        assert self.split in {'TRAIN', 'VAL', 'TEST'}
+        # assert self.split in {'TRAIN', 'VAL', 'TEST'}
 
         # Open hdf5 file where images are stored
         self.h = h5py.File(os.path.join(
@@ -47,11 +47,6 @@ class CaptionDataset(Dataset):
 
         # Total number of data image
         self.dataset_size = len(self.captions_structure)
-        print(len(self.captions_structure) == len(self.captions_cell))
-
-        print(len(self.caplens_cell) == len(self.caplens_structure))
-
-        print(len(self.captions_structure) == len(self.caplens_structure))
 
     def __getitem__(self, i):
         # Remember, the Nth caption structure corresponds to the Nth image
@@ -63,7 +58,6 @@ class CaptionDataset(Dataset):
 
         caplen_structure = torch.LongTensor([self.caplens_structure[i]])
 
-        print(np.array(self.captions_cell[i]).shape)
         captions_cell = torch.LongTensor(self.captions_cell[i])
 
         caplen_cell = torch.LongTensor(self.caplens_cell[i])
