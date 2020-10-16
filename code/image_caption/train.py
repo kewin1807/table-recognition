@@ -13,9 +13,11 @@ from nltk.translate.bleu_score import corpus_bleu
 data_folder = "output"
 
 # Model parameters
-emb_dim = 512  # dimension of word embeddings
+emb_dim = 80  # dimension of word embeddings
 attention_dim = 512  # dimension of attention linear layers
-decoder_dim = 512  # dimension of decoder RNN
+decoder_dim_structure = 256  # dimension of decoder RNN structure
+decoder_dim_cell = 512
+
 dropout = 0.5
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,7 +30,7 @@ epochs = 120
 
 # keeps track of number of epochs since there's been an improvement in validation BLEU
 epochs_since_improvement = 0
-batch_size = 32
+batch_size = 8
 batch_size_cell_per_image = 4
 
 workers = 1  # for data-loading; right now, only 1 works with h5py
@@ -40,10 +42,11 @@ best_bleu4 = 0.  # BLEU-4 score right now
 print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = False  # fine-tune encoder?
 checkpoint = None  # path to checkpoint, None if none
+hyper_loss = 0.5
 
 
 def main():
-    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement
+    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement, hyper_loss,id2word_stucture, id2word_cell
     word_map_structure_file = os.path.join(
         data_folder, "WORDMAP_STRUCTURE.json")
     word_map_cell_file = os.path.join(data_folder, "WORDMAP_CELL.json")
@@ -52,15 +55,16 @@ def main():
         word_map_structure = json.load(j)
     with open(word_map_cell_file, "r") as j:
         word_map_cell = json.load(j)
-
+    id2word_stucture = id_to_word(word_map_structure)
+    id2word_cell = id_to_word(word_map_cell)
     if checkpoint is None:
         decoder_structure = DecoderStuctureWithAttention(attention_dim=attention_dim,
                                                          embed_dim=emb_dim,
-                                                         decoder_dim=decoder_dim,
+                                                         decoder_dim=decoder_dim_structure,
                                                          vocab=word_map_structure,
                                                          dropout=dropout)
         decoder_cell = DecoderCellPerImageWithAttention(
-            attention_dim=attention_dim, embed_dim=emb_dim, decoder_dim=decoder_dim, vocab_size=len(word_map_cell), dropout=0.2)
+            attention_dim=attention_dim, embed_dim=emb_dim, decoder_dim=decoder_dim_cell, vocab_size=len(word_map_cell), dropout=0.2, decoder_structure_dim=decoder_dim_structure)
         decoder_structure_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder_structure.parameters()),
                                                        lr=decoder_lr)
         decoder_cell_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder_structure.parameters()),
@@ -105,9 +109,9 @@ def main():
         CaptionDataset(data_folder, 'train',
                        transform=transforms.Compose([normalize])), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
-    # val = torch.utils.data.DataLoader(
-    #     CaptionDataset(data_folder, 'val',
-    #                    transform=transforms.Compose([normalize])), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+    val_loader = torch.utils.data.DataLoader(
+        CaptionDataset(data_folder, 'val',
+                       transform=transforms.Compose([normalize])), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
 
     # train foreach epoch
     for epoch in range(start_epoch, epochs):
@@ -123,14 +127,17 @@ def main():
               encoder=encoder,
               decoder_structure=decoder_structure,
               decoder_cell=decoder_cell,
-              criterion=criterion,
+              criterion_structure=criterion,
+              criterion_cell=criterion,
               encoder_optimizer=encoder_optimizer,
               decoder_structure_optimizer=decoder_structure_optimizer,
               decoder_cell_optimizer=decoder_cell_optimizer,
               epoch=epoch)
+        val(val_loader = val_loader, encoder=encoder, decoder_structure= decoder_structure, decoder_cell=decoder_cell, criterion_structure=criterion,
+              criterion_cell=criterion)
 
 
-def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, encoder_optimizer, decoder_structure_optimizer, decoder_cell_optimizer, epoch):
+def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_structure, criterion_cell, encoder_optimizer, decoder_structure_optimizer, decoder_cell_optimizer, epoch):
 
     decoder_structure.train()
     decoder_cell.train()
@@ -140,6 +147,8 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, enc
     data_time = AverageMeter()  # data loading time
     losses = AverageMeter()  # loss (per word decoded)
     top5accs = AverageMeter()  # top5 accuracy
+    start = time.time()
+
 
     for i, (imgs, caption_structures, caplen_structures, caption_cells, caplen_cells, number_cell_per_images) in enumerate(train_loader):
         imgs = imgs.to(device)
@@ -150,8 +159,22 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, enc
         imgs = encoder(imgs)
         scores, caps_sorted, decode_lengths, alphas, hidden_states, sort_ind = decoder_structure(
             imgs, caption_structures, caplen_structures)
+        # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
+        targets = caps_sorted[:, 1:]
 
+        # Remove timesteps that we didn't decode at, or are pads
+        # pack_padded_sequence is an easy trick to do this
+        scores = pack_padded_sequence(
+            scores, decode_lengths, batch_first=True).data
+        targets = pack_padded_sequence(
+            targets, decode_lengths, batch_first=True).data
+        # Calculate loss
+        loss_structures = criterion_structure(scores, targets)
+
+        # Add doubly stochastic attention regularization
+        loss_structures += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
         # decoder cell per image
+        loss_cells = []
         for (i, ind) in enumerate(sort_ind):
             img = imgs[ind]
             hidden_state_structures = hidden_states[i]
@@ -167,9 +190,205 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, enc
             scores_cell, caps_sorted_cell, decode_lengths_cell, alphas, sort_ind = decoder_cell(
                 img, caption_cell, caplen_cell, hidden_state_structures, number_cell_per_image)
 
+            target_cells = caps_sorted_cell[:, 1:]
+            # Remove timesteps that we didn't decode at, or are pads
+            # pack_padded_sequence is an easy trick to do this
+            scores_cell = pack_padded_sequence(
+                scores_cell, decode_lengths_cell, batch_first=True).data
+            target_cells = pack_padded_sequence(
+                target_cells, decode_lengths_cell, batch_first=True).data
 
-            # print("scores: ", scores)
-            # print("size of scores: ", scores.size())
+            loss_cell = criterion_cell(scores_cell, target_cells)
+            # Add doubly stochastic attention regularization
+            loss_cell += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
+            loss_cells.append(loss_cell)
+
+            target_cells = caps_sorted_cell[:, 1:]
+
+        # get mean loss_cells
+        loss_cells = torch.stack(loss_cells)
+
+        loss_cells = torch.mean(loss_cells)
+        loss = hyper_loss * loss_structures + (1-hyper_loss) * loss_cells
+
+        # Back prop.
+        decoder_structure_optimizer.zero_grad()
+        decoder_cell_optimizer.zero_grad()
+        if encoder_optimizer is not None:
+            encoder_optimizer.zero_grad()
+        loss.backward(retain_graph=True)
+        loss_structures.backward(retain_graph=True)
+        loss_cells.backward()
+        
+
+        if grad_clip is not None:
+            clip_gradient(decoder_structure_optimizer, grad_clip)
+            clip_gradient(decoder_cell_optimizer, grad_clip)
+            if encoder_optimizer is not None:
+                clip_gradient(encoder_optimizer, grad_clip)
+
+        # Update weights
+        decoder_structure_optimizer.step()
+        decoder_cell_optimizer.step()
+        if encoder_optimizer is not None:
+            encoder_optimizer.step()
+         # Keep track of metrics
+        top5 = accuracy(scores, targets, 5)
+        losses.update(loss_structures.item(), sum(decode_lengths))
+        top5accs.update(top5, sum(decode_lengths))
+        batch_time.update(time.time() - start)
+        start = time.time()
+
+        # Print status
+        if i % print_freq == 0:
+            print('Epoch: [{0}][{1}/{2}]\t'
+                  'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                  'Data Load Time {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                  'Top-5 Accuracy {top5.val:.3f} ({top5.avg:.3f})'.format(epoch, i, len(train_loader),
+                                                                          batch_time=batch_time,
+                                                                          data_time=data_time, loss=losses,
+                                                                          top5=top5accs))
+
+
+def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structure, criterion_cell):
+    decoder_structure.eval() # eval mode (no dropout or batchnorm)
+    decoder_cell.eval()
+    if encoder is not None:
+        encoder.eval()
+
+    batch_time = AverageMeter()
+    losses = AverageMeter()
+    top5accs = AverageMeter()
+    start = time.time()
+
+    true_html = []  # references (true captions) for calculating TEDS score
+    predict_html = []  # hypotheses (predictions)
+
+    # explicitly disable gradient calculation to avoid CUDA memory error
+    # solves the issue #57
+    with torch.no_grad():
+        for i, (imgs, caption_structures, caplen_structures, caption_cells, caplen_cells, number_cell_per_images) in enumerate(val_loader):
+            imgs = imgs.to(device)
+            caption_structures = caption_structures.to(device)
+            caplen_structures = caplen_structures.to(device)
+
+        # Foward encoder image and decoder structure
+            imgs = encoder(imgs)
+            scores, caps_sorted, decode_lengths, alphas, hidden_states, sort_ind_structure = decoder_structure(
+                imgs, caption_structures, caplen_structures)
+            
+             # Remove timesteps that we didn't decode at, or are pads
+            # pack_padded_sequence is an easy trick to do this
+            scores_copy = scores.clone()
+            targets = caps_sorted[:, 1:]
+            scores = pack_padded_sequence(
+                scores, decode_lengths, batch_first=True).data
+            targets = pack_padded_sequence(
+                targets, decode_lengths, batch_first=True).data
+            # Calculate loss
+            loss_structures = criterion_structure(scores, targets)
+
+            # Add doubly stochastic attention regularization
+            loss_structures += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
+            # decoder cell per image
+            loss_cells = []
+            
+
+            for (i, ind) in enumerate(sort_ind_structure):
+                html_predict = ""
+                html_true = ""
+                img = imgs[ind]
+                hidden_state_structures = hidden_states[i]
+                hidden_state_structures = torch.stack(hidden_state_structures)
+                number_cell_per_image = number_cell_per_images[ind][0]
+
+                caption_cell = caption_cells[ind][:number_cell_per_image]
+                caplen_cell = caplen_cells[ind][:number_cell_per_image]
+                caption_cell = caption_cell.to(device)
+                caplen_cell = caplen_cell.to(device)
+
+                # Foward encoder image and decoder cell per image
+                scores_cell, caps_sorted_cell, decode_lengths_cell, alphas, sort_ind = decoder_cell(
+                    img, caption_cell, caplen_cell, hidden_state_structures, number_cell_per_image)
+                target_cells = caps_sorted_cell[:, 1:]
+                sort_ind = sort_ind.cpu().numpy()
+                
+                
+                # Remove timesteps that we didn't decode at, or are pads
+                # pack_padded_sequence is an easy trick to do this
+                scores_cell_copy = scores_cell.clone()
+                scores_cell = pack_padded_sequence(
+                    scores_cell, decode_lengths_cell, batch_first=True).data
+                target_cells = pack_padded_sequence(
+                    target_cells, decode_lengths_cell, batch_first=True).data
+
+                loss_cell = criterion_cell(scores_cell, target_cells)
+                # Add doubly stochastic attention regularization
+                loss_cell += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
+                loss_cells.append(loss_cell)
+
+                
+                _, pred_cells = torch.max(scores_cell_copy, dim=2)
+                pred_cells = pred_cells.tolist()
+                temp_preds = list()
+                ground_truth = list()
+                # get cell content in per images when predict
+                for j, p in enumerate(pred_cells):
+                    # because sort cell with descending, mapping pred_cell to sort_ind
+                    words = pred_cells[sort_ind[j]][:decode_lengths_cell[sort_ind[j]]]
+                    temp_preds.append(convertId2wordSentence(id2word_cell, words))
+                
+                #get cell content in per images ground_truth
+                
+                for j in range(caption_cell.shape[0]):
+                    img_caps = caption_cell[j].tolist()
+                    img_captions = [w for w in img_caps if w not in {word_map_cell['<start>'], word_map_cell['<pad>']}] # remove <start> and pads
+                    ground_truth.append(convertId2wordSentence(id2word_cell, img_captions))
+                
+                index_cell = 0
+                cap_structure = caps_sorted[i][:decode_lengths[i]].tolist()
+                number_cell = 0 
+                for i in cap_structure:
+                    if i == word_map_structure["<start>"]:
+                        continue
+                    html_predict+=id2word_stucture[i]
+                    html_true+=id2word_stucture[i]
+                    if i == word_map_structure["<td>"] or i == word_map_structure[">"]:
+                        html_predict +=temp_preds[index_cell]
+                        html_true+=ground_truth[index_cell]
+                        index_cell+=1
+                print("html_predict: ", html_predict)
+                print("html_true: ", html_true)
+
+
+                # print("number_cell: ", number_cell)
+                    
+
+
+                
+                # get html in per images when predict
+                
+
+
+                
+                 
+            
+            # get mean loss_cells
+            loss_cells = torch.stack(loss_cells)
+
+            loss_cells = torch.mean(loss_cells)
+            loss = hyper_loss * loss_structures + (1-hyper_loss) * loss_cells
+
+            print("LOSS_STRUCTURE: {} \n LOSS_CELL: {} \n LOSS_DUAL_DECODER: {}".format(loss_structures, loss_cells, loss))
+
+            
+            # temp_preds = list()
+            # for j, p in enumerate(preds):
+            #     temp_preds.append(preds[j][:decode_lengths[j]])  # remove pads
+            # preds = temp_preds
+            # print(preds)
+            # hypotheses.extend(preds)
 
 
 if __name__ == "__main__":

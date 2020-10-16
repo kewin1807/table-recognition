@@ -2,5 +2,11 @@ apted
 distance
 lxml
 tqdm
+h5py
+scipy==1.1.0
+jsonlines
+nltk
+html
+beautifulsoup4
 conda install pytorch torchvision cudatoolkit=10.1 -c pytorch
 

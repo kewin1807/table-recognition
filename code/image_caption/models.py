@@ -205,10 +205,6 @@ class DecoderStuctureWithAttention(nn.Module):
         encoder_out = encoder_out[sort_ind]
 
         encoded_captions = encoded_captions[sort_ind]
-        # print("encoded_captions: ", encoded_captions)
-        # print("one element encoded captions: ", encoded_captions[0])
-        # print("one element encoded captions: ", encoded_captions[0].size())
-        # print(encoded_captions.size())
 
         # Embedding
         # (batch_size, max_caption_length, embed_dim)
@@ -257,21 +253,11 @@ class DecoderStuctureWithAttention(nn.Module):
             predictions[:batch_size_t, t, :] = preds
             alphas[:batch_size_t, t, :] = alpha
 
-        # hidden_states = torch.FloatTensor(hidden_states)
-        # print(len(hidden_states[2]))
-        # number_of_cells = 0
-        # for t in range(decode_lengths[2]):
-        #     if self.vocab["<td>"] == encoded_captions[2][t].numpy() or self.vocab[">"] == encoded_captions[2][t].numpy():
-        #         number_of_cells += 1
-
-        # print("cell: hidden_state_1", number_of_cells)
-        # print("size of hidden state: ", hidden_states[1][0].size())
-
         return predictions, encoded_captions, decode_lengths, alphas, hidden_states, sort_ind
 
 
 class DecoderCellPerImageWithAttention(nn.Module):
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5):
+    def __init__(self, attention_dim, embed_dim, decoder_dim, decoder_structure_dim, vocab_size, encoder_dim=2048, dropout=0.5):
         """
         :param attention_dim: size of attention network
         :param embed_dim: embedding size
@@ -295,7 +281,7 @@ class DecoderCellPerImageWithAttention(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
         self.dropout = nn.Dropout(p=self.dropout)
         self.decode_step = nn.LSTMCell(
-            embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding LSTMCell
+            embed_dim + encoder_dim + decoder_structure_dim, decoder_dim, bias=True)  # decoding LSTMCell
         # linear layer to find initial hidden state of LSTMCell
         self.init_h = nn.Linear(encoder_dim, decoder_dim)
         # linear layer to find initial cell state of LSTMCell
@@ -394,9 +380,8 @@ class DecoderCellPerImageWithAttention(nn.Module):
             attention_weighted_encoding = gate * attention_weighted_encoding
 
             # concat hidden state structure + attention_weighted_encoding
-            # attention_weighted_encoding = torch.cat(
-            #     (attention_weighted_encoding, hidden_state_structures[:batch_size_t]), dim=1)
-            print(embeddings[:batch_size_t, t, :].size())
+            attention_weighted_encoding = torch.cat(
+                (attention_weighted_encoding, hidden_state_structures[:batch_size_t]), dim=1)
             h, c = self.decode_step(
                 torch.cat([embeddings[:batch_size_t, t, :],
                            attention_weighted_encoding], dim=1),
