@@ -19,6 +19,7 @@ decoder_dim = 512  # dimension of decoder RNN
 dropout = 0.5
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 cudnn.benchmark = True
 
 # training_parameter
@@ -152,11 +153,10 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, enc
 
         # decoder cell per image
         for (i, ind) in enumerate(sort_ind):
-            print("ind: ", ind)
             img = imgs[ind]
             hidden_state_structures = hidden_states[i]
             hidden_state_structures = torch.stack(hidden_state_structures)
-            number_cell_per_image = number_cell_per_images[ind].numpy()[0]
+            number_cell_per_image = number_cell_per_images[ind][0]
 
             caption_cell = caption_cells[ind][:number_cell_per_image]
             caplen_cell = caplen_cells[ind][:number_cell_per_image]
@@ -167,7 +167,6 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion, enc
             scores_cell, caps_sorted_cell, decode_lengths_cell, alphas, sort_ind = decoder_cell(
                 img, caption_cell, caplen_cell, hidden_state_structures, number_cell_per_image)
 
-            print(caps_sorted_cell.size())
 
             # print("scores: ", scores)
             # print("size of scores: ", scores.size())

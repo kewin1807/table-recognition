@@ -250,7 +250,7 @@ class DecoderStuctureWithAttention(nn.Module):
 
             # get and save hidden state h_k+1 when groun_truth token in t_k is <td> or >
             for i in range(batch_size_t):
-                if self.vocab["<td>"] == encoded_captions[i][t].numpy() or self.vocab[">"] == encoded_captions[i][t].numpy():
+                if self.vocab["<td>"] == encoded_captions[i][t].cpu().numpy() or self.vocab[">"] == encoded_captions[i][t].cpu().numpy():
                     hidden_states[i].append(h[i])
 
             preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
@@ -358,15 +358,17 @@ class DecoderCellPerImageWithAttention(nn.Module):
         num_pixels = encoder_out.size(1)
 
         # Sort input data by decreasing lengths; why? apparent below
-        # caption_lengths, sort_ind = caption_lengths.unsqueeze(
-        #     1).squeeze(
-        #     1).sort(dim=0,descending=True)
-        caption_lengths, sort_ind = caption_lengths.sort(descending=True)
-        sort_ind = sort_ind.numpy()
+        caption_lengths, sort_ind = caption_lengths.unsqueeze(
+            1).squeeze(
+            1).sort(dim=0,descending=True)
+        # caption_lengths, sort_ind = caption_lengths.sort(descending=True)
         encoder_out = encoder_out[sort_ind]
         encoded_captions = encoded_captions[sort_ind]
         # hidden_state_structures size (batch_size, decoder_dim)
         hidden_state_structures = hidden_state_structures[sort_ind]
+        # Embedding
+        # (batch_size, max_caption_length, embed_dim)
+        embeddings = self.embedding(encoded_captions)
 
         # Initialize LSTM cell state
         # size is (batch_size, decoder_dim)
@@ -392,10 +394,11 @@ class DecoderCellPerImageWithAttention(nn.Module):
             attention_weighted_encoding = gate * attention_weighted_encoding
 
             # concat hidden state structure + attention_weighted_encoding
-            attention_weighted_encoding += hidden_state_structures[:batch_size_t]
-
+            # attention_weighted_encoding = torch.cat(
+            #     (attention_weighted_encoding, hidden_state_structures[:batch_size_t]), dim=1)
+            print(embeddings[:batch_size_t, t, :].size())
             h, c = self.decode_step(
-                torch.cat([self.embeddings[:batch_size_t, t, :],
+                torch.cat([embeddings[:batch_size_t, t, :],
                            attention_weighted_encoding], dim=1),
                 (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
             preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
