@@ -205,10 +205,6 @@ class DecoderStuctureWithAttention(nn.Module):
         encoder_out = encoder_out[sort_ind]
 
         encoded_captions = encoded_captions[sort_ind]
-        # print("encoded_captions: ", encoded_captions)
-        # print("one element encoded captions: ", encoded_captions[0])
-        # print("one element encoded captions: ", encoded_captions[0].size())
-        # print(encoded_captions.size())
 
         # Embedding
         # (batch_size, max_caption_length, embed_dim)
@@ -271,7 +267,7 @@ class DecoderStuctureWithAttention(nn.Module):
 
 
 class DecoderCellPerImageWithAttention(nn.Module):
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=2048, dropout=0.5):
+    def __init__(self, attention_dim, embed_dim, decoder_dim, decoder_structure_dim, vocab_size, encoder_dim=2048, dropout=0.5):
         """
         :param attention_dim: size of attention network
         :param embed_dim: embedding size
@@ -295,7 +291,7 @@ class DecoderCellPerImageWithAttention(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
         self.dropout = nn.Dropout(p=self.dropout)
         self.decode_step = nn.LSTMCell(
-            embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding LSTMCell
+            embed_dim + encoder_dim + decoder_structure_dim, decoder_dim, bias=True)  # decoding LSTMCell
         # linear layer to find initial hidden state of LSTMCell
         self.init_h = nn.Linear(encoder_dim, decoder_dim)
         # linear layer to find initial cell state of LSTMCell
