@@ -10,9 +10,7 @@ from random import seed, choice, sample
 import jsonlines
 from bs4 import BeautifulSoup as bs
 from html import escape
-
-width_image = 512
-height_image = 512
+from constants import width_image, height_image
 
 
 def create_input_files(json_file_path, image_folder="examples/examples", output_folder="output",
@@ -331,17 +329,10 @@ def accuracy(scores, targets, k):
     correct_total = correct.view(-1).float().sum()  # 0D tensor
     return correct_total.item() * (100.0 / batch_size)
 
-def format_html(img):
+def format_html(html):
     ''' Formats HTML code from tokenized annotation of img
     '''
-    html_code = img['html']['structure']['tokens'].copy()
-    to_insert = [i for i, tag in enumerate(html_code) if tag in ('<td>', '>')]
-    for i, cell in zip(to_insert[::-1], img['html']['cells'][::-1]):
-        if cell['tokens']:
-            cell = [escape(token) if len(token) == 1 else token for token in cell['tokens']]
-            cell = ''.join(cell)
-            html_code.insert(i + 1, cell)
-    html_code = ''.join(html_code)
+
     html_code = '''<html>
                    <head>
                    <meta charset="UTF-8">
@@ -357,7 +348,7 @@ def format_html(img):
                      %s
                    </table>
                    </body>
-                   </html>''' % html_code
+                   </html>''' % html
 
     # prettify the html
     soup = bs(html_code)
@@ -367,6 +358,7 @@ def format_html(img):
 
 def convertId2wordSentence(id2word, idwords):
     words = [id2word[idword] for idword in idwords]
+    words = [word for word in words if word !="<end>" and word!="<start>"]
     words = "".join(words)
     return words
 

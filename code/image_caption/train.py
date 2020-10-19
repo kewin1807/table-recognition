@@ -9,6 +9,8 @@ from models import Encoder, DecoderStuctureWithAttention, DecoderCellPerImageWit
 from dataset import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
+from metric.metric_score import TEDS
+
 
 data_folder = "output"
 
@@ -30,7 +32,7 @@ epochs = 120
 
 # keeps track of number of epochs since there's been an improvement in validation BLEU
 epochs_since_improvement = 0
-batch_size = 8
+batch_size = 4
 batch_size_cell_per_image = 4
 
 workers = 1  # for data-loading; right now, only 1 works with h5py
@@ -46,10 +48,11 @@ hyper_loss = 0.5
 
 
 def main():
-    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement, hyper_loss,id2word_stucture, id2word_cell
+    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement, hyper_loss,id2word_stucture, id2word_cell, teds
     word_map_structure_file = os.path.join(
         data_folder, "WORDMAP_STRUCTURE.json")
     word_map_cell_file = os.path.join(data_folder, "WORDMAP_CELL.json")
+    teds = TEDS(n_jobs=4)
 
     with open(word_map_structure_file, "r") as j:
         word_map_structure = json.load(j)
@@ -262,8 +265,6 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
     top5accs = AverageMeter()
     start = time.time()
 
-    true_html = []  # references (true captions) for calculating TEDS score
-    predict_html = []  # hypotheses (predictions)
 
     # explicitly disable gradient calculation to avoid CUDA memory error
     # solves the issue #57
@@ -293,11 +294,14 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
             loss_structures += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
             # decoder cell per image
             loss_cells = []
+            _, pred_structure = torch.max(scores_copy, dim=2)
+            pred_structure = pred_structure.tolist()
             
 
             for (i, ind) in enumerate(sort_ind_structure):
-                html_predict = ""
+                html_predict_only_cell = ""
                 html_true = ""
+                html_predict_all = ""
                 img = imgs[ind]
                 hidden_state_structures = hidden_states[i]
                 hidden_state_structures = torch.stack(hidden_state_structures)
@@ -348,18 +352,30 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
                 
                 index_cell = 0
                 cap_structure = caps_sorted[i][:decode_lengths[i]].tolist()
+                pred_structure_image = pred_structure[i][:decode_lengths[i]]
                 number_cell = 0 
-                for i in cap_structure:
-                    if i == word_map_structure["<start>"]:
+                for (index,c) in enumerate(cap_structure):
+                    if c == word_map_structure["<start>"] or c == word_map_structure["<end>"]:
                         continue
-                    html_predict+=id2word_stucture[i]
-                    html_true+=id2word_stucture[i]
-                    if i == word_map_structure["<td>"] or i == word_map_structure[">"]:
-                        html_predict +=temp_preds[index_cell]
+                    html_predict_only_cell+=id2word_stucture[c]
+                    html_true+=id2word_stucture[c]
+                    html_predict_all +=id2word_stucture[pred_structure_image[index]]
+                    if c == word_map_structure["<td>"] or c == word_map_structure[">"]:
+                        html_predict_only_cell +=temp_preds[index_cell]
                         html_true+=ground_truth[index_cell]
+                        html_predict_all += temp_preds[index_cell]
                         index_cell+=1
-                print("html_predict: ", html_predict)
+                
+                print("html_predict: ", html_predict_only_cell)
                 print("html_true: ", html_true)
+                print("html_predict_all: ", html_predict_all)
+
+               
+                score = teds.evaluate(html_predict_code, html_true_code)
+                print('TEDS score:', score)
+
+                #calculate TEDS for recognition
+
 
 
                 # print("number_cell: ", number_cell)
