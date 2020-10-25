@@ -23,7 +23,6 @@ decoder_dim_cell = 512
 dropout = 0.5
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
 cudnn.benchmark = True
 
 # training_parameter
@@ -48,7 +47,7 @@ hyper_loss = 0.5
 
 
 def main():
-    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement, hyper_loss,id2word_stucture, id2word_cell, teds
+    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement, hyper_loss, id2word_stucture, id2word_cell, teds
     word_map_structure_file = os.path.join(
         data_folder, "WORDMAP_STRUCTURE.json")
     word_map_cell_file = os.path.join(data_folder, "WORDMAP_CELL.json")
@@ -136,8 +135,8 @@ def main():
               decoder_structure_optimizer=decoder_structure_optimizer,
               decoder_cell_optimizer=decoder_cell_optimizer,
               epoch=epoch)
-        val(val_loader = val_loader, encoder=encoder, decoder_structure= decoder_structure, decoder_cell=decoder_cell, criterion_structure=criterion,
-              criterion_cell=criterion)
+        val(val_loader=val_loader, encoder=encoder, decoder_structure=decoder_structure, decoder_cell=decoder_cell, criterion_structure=criterion,
+            criterion_cell=criterion)
 
 
 def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_structure, criterion_cell, encoder_optimizer, decoder_structure_optimizer, decoder_cell_optimizer, epoch):
@@ -151,7 +150,6 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_stru
     losses = AverageMeter()  # loss (per word decoded)
     top5accs = AverageMeter()  # top5 accuracy
     start = time.time()
-
 
     for i, (imgs, caption_structures, caplen_structures, caption_cells, caplen_cells, number_cell_per_images) in enumerate(train_loader):
         imgs = imgs.to(device)
@@ -222,7 +220,6 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_stru
         loss.backward(retain_graph=True)
         loss_structures.backward(retain_graph=True)
         loss_cells.backward()
-        
 
         if grad_clip is not None:
             clip_gradient(decoder_structure_optimizer, grad_clip)
@@ -255,7 +252,7 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_stru
 
 
 def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structure, criterion_cell):
-    decoder_structure.eval() # eval mode (no dropout or batchnorm)
+    decoder_structure.eval()  # eval mode (no dropout or batchnorm)
     decoder_cell.eval()
     if encoder is not None:
         encoder.eval()
@@ -264,7 +261,6 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
     losses = AverageMeter()
     top5accs = AverageMeter()
     start = time.time()
-
 
     # explicitly disable gradient calculation to avoid CUDA memory error
     # solves the issue #57
@@ -278,8 +274,8 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
             imgs = encoder(imgs)
             scores, caps_sorted, decode_lengths, alphas, hidden_states, sort_ind_structure = decoder_structure(
                 imgs, caption_structures, caplen_structures)
-            
-             # Remove timesteps that we didn't decode at, or are pads
+
+            # Remove timesteps that we didn't decode at, or are pads
             # pack_padded_sequence is an easy trick to do this
             scores_copy = scores.clone()
             targets = caps_sorted[:, 1:]
@@ -296,7 +292,6 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
             loss_cells = []
             _, pred_structure = torch.max(scores_copy, dim=2)
             pred_structure = pred_structure.tolist()
-            
 
             for (i, ind) in enumerate(sort_ind_structure):
                 html_predict_only_cell = ""
@@ -317,8 +312,7 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
                     img, caption_cell, caplen_cell, hidden_state_structures, number_cell_per_image)
                 target_cells = caps_sorted_cell[:, 1:]
                 sort_ind = sort_ind.cpu().numpy()
-                
-                
+
                 # Remove timesteps that we didn't decode at, or are pads
                 # pack_padded_sequence is an easy trick to do this
                 scores_cell_copy = scores_cell.clone()
@@ -332,7 +326,6 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
                 loss_cell += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
                 loss_cells.append(loss_cell)
 
-                
                 _, pred_cells = torch.max(scores_cell_copy, dim=2)
                 pred_cells = pred_cells.tolist()
                 temp_preds = list()
@@ -340,65 +333,58 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
                 # get cell content in per images when predict
                 for j, p in enumerate(pred_cells):
                     # because sort cell with descending, mapping pred_cell to sort_ind
-                    words = pred_cells[sort_ind[j]][:decode_lengths_cell[sort_ind[j]]]
-                    temp_preds.append(convertId2wordSentence(id2word_cell, words))
-                
-                #get cell content in per images ground_truth
-                
+                    words = pred_cells[sort_ind[j]
+                                       ][:decode_lengths_cell[sort_ind[j]]]
+                    temp_preds.append(
+                        convertId2wordSentence(id2word_cell, words))
+
+                # get cell content in per images ground_truth
+
                 for j in range(caption_cell.shape[0]):
                     img_caps = caption_cell[j].tolist()
-                    img_captions = [w for w in img_caps if w not in {word_map_cell['<start>'], word_map_cell['<pad>']}] # remove <start> and pads
-                    ground_truth.append(convertId2wordSentence(id2word_cell, img_captions))
-                
+                    img_captions = [w for w in img_caps if w not in {
+                        word_map_cell['<start>'], word_map_cell['<pad>']}]  # remove <start> and pads
+                    ground_truth.append(convertId2wordSentence(
+                        id2word_cell, img_captions))
+
                 index_cell = 0
                 cap_structure = caps_sorted[i][:decode_lengths[i]].tolist()
                 pred_structure_image = pred_structure[i][:decode_lengths[i]]
-                number_cell = 0 
-                for (index,c) in enumerate(cap_structure):
+                number_cell = 0
+                for (index, c) in enumerate(cap_structure):
                     if c == word_map_structure["<start>"] or c == word_map_structure["<end>"]:
                         continue
-                    html_predict_only_cell+=id2word_stucture[c]
-                    html_true+=id2word_stucture[c]
-                    html_predict_all +=id2word_stucture[pred_structure_image[index]]
+                    html_predict_only_cell += id2word_stucture[c]
+                    html_true += id2word_stucture[c]
+                    html_predict_all += id2word_stucture[pred_structure_image[index]]
                     if c == word_map_structure["<td>"] or c == word_map_structure[">"]:
-                        html_predict_only_cell +=temp_preds[index_cell]
-                        html_true+=ground_truth[index_cell]
+                        html_predict_only_cell += temp_preds[index_cell]
+                        html_true += ground_truth[index_cell]
                         html_predict_all += temp_preds[index_cell]
-                        index_cell+=1
-                
+                        index_cell += 1
+
                 print("html_predict: ", html_predict_only_cell)
                 print("html_true: ", html_true)
                 print("html_predict_all: ", html_predict_all)
 
-               
-                score = teds.evaluate(html_predict_code, html_true_code)
-                print('TEDS score:', score)
+                # score = teds.evaluate(html_predict_code, html_true_code)
+                # print('TEDS score:', score)
 
-                #calculate TEDS for recognition
-
-
+                # calculate TEDS for recognition
 
                 # print("number_cell: ", number_cell)
-                    
 
-
-                
                 # get html in per images when predict
-                
 
-
-                
-                 
-            
             # get mean loss_cells
             loss_cells = torch.stack(loss_cells)
 
             loss_cells = torch.mean(loss_cells)
             loss = hyper_loss * loss_structures + (1-hyper_loss) * loss_cells
 
-            print("LOSS_STRUCTURE: {} \n LOSS_CELL: {} \n LOSS_DUAL_DECODER: {}".format(loss_structures, loss_cells, loss))
+            print("LOSS_STRUCTURE: {} \n LOSS_CELL: {} \n LOSS_DUAL_DECODER: {}".format(
+                loss_structures, loss_cells, loss))
 
-            
             # temp_preds = list()
             # for j, p in enumerate(preds):
             #     temp_preds.append(preds[j][:decode_lengths[j]])  # remove pads

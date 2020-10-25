@@ -337,7 +337,7 @@ class DecoderCellPerImageWithAttention(nn.Module):
         vocab_size = self.vocab_size
 
         # Flatten image
-        # (batch_size, num_pixels, encoder_dim)
+        # expand encoder_out (batch_size, num_pixels, encoder_dim)
         encoder_out = encoder_out.view(-1, encoder_dim)
         encoder_out = encoder_out.squeeze(1).repeat(batch_size, 1, 1)
 
@@ -346,7 +346,7 @@ class DecoderCellPerImageWithAttention(nn.Module):
         # Sort input data by decreasing lengths; why? apparent below
         caption_lengths, sort_ind = caption_lengths.unsqueeze(
             1).squeeze(
-            1).sort(dim=0,descending=True)
+            1).sort(dim=0, descending=True)
         # caption_lengths, sort_ind = caption_lengths.sort(descending=True)
         encoder_out = encoder_out[sort_ind]
         encoded_captions = encoded_captions[sort_ind]
