@@ -10,7 +10,7 @@ from dataset import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
 from metric.metric_score import TEDS
-
+import numpy as np
 
 data_folder = "output"
 
@@ -32,33 +32,33 @@ epochs = 120
 # keeps track of number of epochs since there's been an improvement in validation BLEU
 epochs_since_improvement = 0
 batch_size = 4
-batch_size_cell_per_image = 4
 
 workers = 1  # for data-loading; right now, only 1 works with h5py
 encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
 decoder_lr = 4e-4  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
-best_bleu4 = 0.  # BLEU-4 score right now
+best_TED = 0.  # TED score right now
 print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = False  # fine-tune encoder?
 checkpoint = None  # path to checkpoint, None if none
 hyper_loss = 0.5
+word_map_structure_file = os.path.join(
+    data_folder, "WORDMAP_STRUCTURE.json")
+word_map_cell_file = os.path.join(data_folder, "WORDMAP_CELL.json")
+teds = TEDS(n_jobs=4)
+
+with open(word_map_structure_file, "r") as j:
+    word_map_structure = json.load(j)
+with open(word_map_cell_file, "r") as j:
+    word_map_cell = json.load(j)
+id2word_stucture = id_to_word(word_map_structure)
+id2word_cell = id_to_word(word_map_cell)
 
 
 def main():
-    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement, hyper_loss, id2word_stucture, id2word_cell, teds
-    word_map_structure_file = os.path.join(
-        data_folder, "WORDMAP_STRUCTURE.json")
-    word_map_cell_file = os.path.join(data_folder, "WORDMAP_CELL.json")
-    teds = TEDS(n_jobs=4)
+    global checkpoint, start_epoch, fine_tune_encoder, word_map_structure, word_map_cell, epochs_since_improvement, hyper_loss, id2word_stucture, id2word_cell, teds, best_TED
 
-    with open(word_map_structure_file, "r") as j:
-        word_map_structure = json.load(j)
-    with open(word_map_cell_file, "r") as j:
-        word_map_cell = json.load(j)
-    id2word_stucture = id_to_word(word_map_structure)
-    id2word_cell = id_to_word(word_map_cell)
     if checkpoint is None:
         decoder_structure = DecoderStuctureWithAttention(attention_dim=attention_dim,
                                                          embed_dim=emb_dim,
@@ -89,6 +89,7 @@ def main():
 
         encoder = checkpoint['encoder']
         encoder_optimizer = checkpoint['encoder_optimizer']
+        best_TED = checkpoint['ted_score']
 
         if fine_tune_encoder is True and encoder_optimizer is None:
             encoder.fine_tune(fine_tune_encoder)
@@ -122,6 +123,7 @@ def main():
             break
         if epochs_since_improvement > 0 and epochs_since_improvement % 8 == 0:
             adjust_learning_rate(decoder_structure, 0.8)
+            adjust_learning_rate(decoder_cell, 0.8)
             if fine_tune_encoder:
                 adjust_learning_rate(encoder_optimizer, 0.8)
 
@@ -135,8 +137,22 @@ def main():
               decoder_structure_optimizer=decoder_structure_optimizer,
               decoder_cell_optimizer=decoder_cell_optimizer,
               epoch=epoch)
-        val(val_loader=val_loader, encoder=encoder, decoder_structure=decoder_structure, decoder_cell=decoder_cell, criterion_structure=criterion,
-            criterion_cell=criterion)
+        recent_ted_score = val(val_loader=val_loader, encoder=encoder, decoder_structure=decoder_structure, decoder_cell=decoder_cell, criterion_structure=criterion,
+                               criterion_cell=criterion)
+
+        # Check if there was an improvement
+        is_best = recent_ted_score > best_TED
+        best_TED = max(recent_ted_score, best_TED)
+        if not is_best:
+            epochs_since_improvement += 1
+            print("\nEpochs since last improvement: %d\n" %
+                  (epochs_since_improvement,))
+        else:
+            epochs_since_improvement = 0
+
+        # save checkpoint
+        save_checkpoint(epoch, epochs_since_improvement, encoder, decoder_structure, decoder_cell,
+                        encoder_optimizer, decoder_structure_optimizer, decoder_cell_optimizer, recent_ted_score, is_best)
 
 
 def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_structure, criterion_cell, encoder_optimizer, decoder_structure_optimizer, decoder_cell_optimizer, epoch):
@@ -254,6 +270,7 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_stru
 def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structure, criterion_cell):
     decoder_structure.eval()  # eval mode (no dropout or batchnorm)
     decoder_cell.eval()
+    global teds
     if encoder is not None:
         encoder.eval()
 
@@ -264,6 +281,9 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
 
     # explicitly disable gradient calculation to avoid CUDA memory error
     # solves the issue #57
+    html_trues = list()
+    html_predict_only_cells = list()
+    html_predict_alls = list()
     with torch.no_grad():
         for i, (imgs, caption_structures, caplen_structures, caption_cells, caplen_cells, number_cell_per_images) in enumerate(val_loader):
             imgs = imgs.to(device)
@@ -367,6 +387,10 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
                 print("html_true: ", html_true)
                 print("html_predict_all: ", html_predict_all)
 
+                html_predict_only_cells.append(html_predict_only_cell)
+                html_predict_alls.append(html_predict_all)
+                html_trues.append(html_true)
+
                 # score = teds.evaluate(html_predict_code, html_true_code)
                 # print('TEDS score:', score)
 
@@ -384,6 +408,14 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
 
             print("LOSS_STRUCTURE: {} \n LOSS_CELL: {} \n LOSS_DUAL_DECODER: {}".format(
                 loss_structures, loss_cells, loss))
+            scores_only_cell = teds.batch_evaluate_html(
+                html_predict_only_cells, html_trues)
+
+            scores_all = teds.batch_evaluate_html(
+                html_predict_alls, html_trues)
+
+            ted_score = np.mean(scores_only_cell)
+            return ted_score
 
             # temp_preds = list()
             # for j, p in enumerate(preds):

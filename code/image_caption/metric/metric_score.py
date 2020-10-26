@@ -155,6 +155,21 @@ class TEDS(object):
         scores = dict(zip(samples, scores))
         return scores
 
+    def batch_evaluate_html(self, pred_htmls, true_htmls):
+        ''' Computes TEDS score between the prediction and the ground truth of
+            a batch of samples
+        '''
+        if self.n_jobs == 1:
+            scores = [self.evaluate(pred_html, true_html) for (
+                pred_html, true_html) in zip(pred_htmls, true_htmls)]
+        else:
+            inputs = [{"pred": pred_html, "true": true_html} for(
+                pred_html, true_html) in zip(pred_htmls, true_htmls)]
+
+            scores = parallel_process(
+                inputs, self.evaluate, use_kwargs=True, n_jobs=self.n_jobs, front_num=1)
+        return scores
+
 
 if __name__ == '__main__':
     import json

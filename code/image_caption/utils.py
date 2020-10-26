@@ -249,8 +249,8 @@ def clip_gradient(optimizer, grad_clip):
                 param.grad.data.clamp_(-grad_clip, grad_clip)
 
 
-def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer, decoder_optimizer,
-                    bleu4, is_best):
+def save_checkpoint(epoch, epochs_since_improvement, encoder, decoder_structure, decoder_cell,
+                    encoder_optimizer, decoder_structure_optimizer, decoder_cell_optimizer, recent_ted_score, is_best):
     """
     Saves model checkpoint.
 
@@ -261,17 +261,20 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
     :param decoder: decoder model
     :param encoder_optimizer: optimizer to update encoder's weights, if fine-tuning
     :param decoder_optimizer: optimizer to update decoder's weights
-    :param bleu4: validation BLEU-4 score for this epoch
+    :param recent_ted_score: validation TED score for this epoch
     :param is_best: is this checkpoint the best so far?
     """
     state = {'epoch': epoch,
              'epochs_since_improvement': epochs_since_improvement,
-             'bleu-4': bleu4,
+             'ted_score': recent_ted_score,
              'encoder': encoder,
-             'decoder': decoder,
+             'decoder_structure': decoder_structure,
              'encoder_optimizer': encoder_optimizer,
-             'decoder_optimizer': decoder_optimizer}
-    filename = 'checkpoint_' + data_name + '.pth.tar'
+             'decoder_structure_optimizer': decoder_structure_optimizer,
+             'decoder_cell': decoder_cell,
+             'decoder_cell_optimizer': decoder_cell_optimizer,
+             }
+    filename = 'checkpoint_table' + '.pth.tar'
     torch.save(state, filename)
     # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
     if is_best:
@@ -329,6 +332,7 @@ def accuracy(scores, targets, k):
     correct_total = correct.view(-1).float().sum()  # 0D tensor
     return correct_total.item() * (100.0 / batch_size)
 
+
 def format_html(html):
     ''' Formats HTML code from tokenized annotation of img
     '''
@@ -358,9 +362,6 @@ def format_html(html):
 
 def convertId2wordSentence(id2word, idwords):
     words = [id2word[idword] for idword in idwords]
-    words = [word for word in words if word !="<end>" and word!="<start>"]
+    words = [word for word in words if word != "<end>" and word != "<start>"]
     words = "".join(words)
     return words
-
-
-
