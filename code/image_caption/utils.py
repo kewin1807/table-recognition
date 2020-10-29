@@ -13,7 +13,7 @@ from html import escape
 from constants import width_image, height_image
 
 
-def create_input_files(json_file_path, image_folder="examples/examples", output_folder="output",
+def create_input_files(image_folder="pubtabnet", output_folder="output",
                        max_len_token_structure=300,
                        max_len_token_cell=130, width_image=512,
                        height_image=512):
@@ -29,7 +29,8 @@ def create_input_files(json_file_path, image_folder="examples/examples", output_
     """
 
     # Read Karpathy JSON
-    with jsonlines.open('examples/PubTabNet_Examples.jsonl', 'r') as reader:
+    print("create_input .....")
+    with open(os.path.join(image_folder, "PubTabNet_2.0.0.jsonl"), 'r') as reader:
         imgs = list(reader)
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -49,7 +50,9 @@ def create_input_files(json_file_path, image_folder="examples/examples", output_
     word_freq_structure = Counter()
     word_freq_cells = Counter()
 
-    for img in imgs:
+    for (index, image) in enumerate(imgs):
+        print("processing_image: {}".format(index))
+        img = eval(image)
         word_freq_structure.update(img["html"]["structure"]["tokens"])
 
         for cell in img["html"]["cells"]:
