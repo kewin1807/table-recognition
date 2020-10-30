@@ -50,6 +50,12 @@ def create_input_files(image_folder="pubtabnet", output_folder="output",
     word_freq_structure = Counter()
     word_freq_cells = Counter()
 
+    max_number_imgs_train = 100000
+    max_numver_imgs_val = 10000
+
+    total_number_imgs_train = 0
+    total_number_imgs_val = 0
+
     for (index, image) in enumerate(imgs):
         print("processing_image: {}".format(index))
         img = eval(image)
@@ -66,18 +72,20 @@ def create_input_files(image_folder="pubtabnet", output_folder="output",
             for cell in img["html"]["cells"]:
                 caption_cells.append(cell["tokens"])
 
-            if img["split"] == "train":
+            if img["split"] == "train" and total_number_imgs_train <= max_number_imgs_train:
                 train_image_captions_structure.append(captions_structure)
                 train_image_captions_cells.append(caption_cells)
                 train_image_paths.append(path)
-            elif img["split"] == "val":
+            elif img["split"] == "val" and total_number_imgs_val <= max_numver_imgs_val:
                 valid_image_captions_structure.append(captions_structure)
                 valid_image_captions_cells.append(caption_cells)
                 valid_image_paths.append(path)
-            else:
+            elif img["split"] == "test":
                 test_image_captions_structure.append(captions_structure)
                 test_image_captions_cells.append(caption_cells)
                 test_image_paths.append(path)
+            else:
+                continue
 
     # create vocabluary structure
     words_structure = [w for w in word_freq_structure.keys()]
