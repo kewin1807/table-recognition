@@ -66,7 +66,8 @@ def create_input_files(image_folder="pubtabnet", output_folder="output",
 
         captions_structure = []
         caption_cells = []
-        path = os.path.join(image_folder, img['filename'])
+        path = os.path.join("{}/{}".format(image_folder,
+                                           img["split"]), img['filename'])
         if len(img["html"]["structure"]["tokens"]) <= max_len_token_structure:
             captions_structure.append(img["html"]["structure"]['tokens'])
             for cell in img["html"]["cells"]:
