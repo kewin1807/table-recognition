@@ -76,10 +76,12 @@ def create_input_files(image_folder="pubtabnet", output_folder="output",
                 train_image_captions_structure.append(captions_structure)
                 train_image_captions_cells.append(caption_cells)
                 train_image_paths.append(path)
+                total_number_imgs_train += 1
             elif img["split"] == "val" and total_number_imgs_val <= max_numver_imgs_val:
                 valid_image_captions_structure.append(captions_structure)
                 valid_image_captions_cells.append(caption_cells)
                 valid_image_paths.append(path)
+                total_number_imgs_val += 1
             elif img["split"] == "test":
                 test_image_captions_structure.append(captions_structure)
                 test_image_captions_cells.append(caption_cells)
