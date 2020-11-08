@@ -34,13 +34,13 @@ epochs_since_improvement = 0
 batch_size = 4
 
 workers = 1  # for data-loading; right now, only 1 works with h5py
-encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
-decoder_lr = 4e-4  # learning rate for decoder
+encoder_lr = 1e-3  # learning rate for encoder if fine-tuning
+decoder_lr = 4e-3  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
 best_TED = 0.  # TED score right now
 print_freq = 100  # print training/validation stats every __ batches
-fine_tune_encoder = False  # fine-tune encoder?
+fine_tune_encoder = True  # fine-tune encoder?
 checkpoint = None  # path to checkpoint, None if none
 hyper_loss = 0.5
 word_map_structure_file = os.path.join(
@@ -108,6 +108,7 @@ def main():
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
+    print("loading train_loader and val_loader:")
     train_loader = torch.utils.data.DataLoader(
         CaptionDataset(data_folder, 'train',
                        transform=transforms.Compose([normalize])), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
@@ -115,7 +116,7 @@ def main():
     val_loader = torch.utils.data.DataLoader(
         CaptionDataset(data_folder, 'val',
                        transform=transforms.Compose([normalize])), batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
-
+    print("Done train_loader and val_loader:")
     # train foreach epoch
     for epoch in range(start_epoch, epochs):
         # Decay learning rate if there is no improvement for 8 consecutive epochs, and terminate training after 20
@@ -415,6 +416,7 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
                 html_predict_alls, html_trues)
 
             ted_score = np.mean(scores_only_cell)
+            print("TED_SCORE: {}".format(ted_score))
             return ted_score
 
             # temp_preds = list()
