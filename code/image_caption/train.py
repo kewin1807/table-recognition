@@ -15,7 +15,8 @@ import numpy as np
 data_folder = "output"
 
 # Model parameters
-emb_dim = 80  # dimension of word embeddings
+emb_dim_structure = 16  # dimension of word embeddings
+emb_dim_cell = 80
 attention_dim = 512  # dimension of attention linear layers
 decoder_dim_structure = 256  # dimension of decoder RNN structure
 decoder_dim_cell = 512
@@ -31,7 +32,7 @@ epochs = 120
 
 # keeps track of number of epochs since there's been an improvement in validation BLEU
 epochs_since_improvement = 0
-batch_size = 4
+batch_size = 2
 
 workers = 1  # for data-loading; right now, only 1 works with h5py
 encoder_lr = 1e-3  # learning rate for encoder if fine-tuning
@@ -39,7 +40,7 @@ decoder_lr = 4e-3  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
 best_TED = 0.  # TED score right now
-print_freq = 100  # print training/validation stats every __ batches
+print_freq = 10  # print training/validation stats every __ batches
 fine_tune_encoder = True  # fine-tune encoder?
 checkpoint = None  # path to checkpoint, None if none
 hyper_loss = 0.5
@@ -61,12 +62,12 @@ def main():
 
     if checkpoint is None:
         decoder_structure = DecoderStuctureWithAttention(attention_dim=attention_dim,
-                                                         embed_dim=emb_dim,
+                                                         embed_dim=emb_dim_structure,
                                                          decoder_dim=decoder_dim_structure,
                                                          vocab=word_map_structure,
                                                          dropout=dropout)
         decoder_cell = DecoderCellPerImageWithAttention(
-            attention_dim=attention_dim, embed_dim=emb_dim, decoder_dim=decoder_dim_cell, vocab_size=len(word_map_cell), dropout=0.2, decoder_structure_dim=decoder_dim_structure)
+            attention_dim=attention_dim, embed_dim=emb_dim_cell, decoder_dim=decoder_dim_cell, vocab_size=len(word_map_cell), dropout=0.2, decoder_structure_dim=decoder_dim_structure)
         decoder_structure_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder_structure.parameters()),
                                                        lr=decoder_lr)
         decoder_cell_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder_structure.parameters()),
@@ -127,7 +128,7 @@ def main():
             adjust_learning_rate(decoder_cell, 0.8)
             if fine_tune_encoder:
                 adjust_learning_rate(encoder_optimizer, 0.8)
-
+        print("Starting train..............")
         train(train_loader=train_loader,
               encoder=encoder,
               decoder_structure=decoder_structure,
@@ -138,6 +139,7 @@ def main():
               decoder_structure_optimizer=decoder_structure_optimizer,
               decoder_cell_optimizer=decoder_cell_optimizer,
               epoch=epoch)
+        print("Starting validation..............")
         recent_ted_score = val(val_loader=val_loader, encoder=encoder, decoder_structure=decoder_structure, decoder_cell=decoder_cell, criterion_structure=criterion,
                                criterion_cell=criterion)
 
@@ -167,8 +169,9 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_stru
     losses = AverageMeter()  # loss (per word decoded)
     top5accs = AverageMeter()  # top5 accuracy
     start = time.time()
-
+    print("length of train_loader: {}".format(len(train_loader)))
     for i, (imgs, caption_structures, caplen_structures, caption_cells, caplen_cells, number_cell_per_images) in enumerate(train_loader):
+        print("process_batch: {}".format(i))
         imgs = imgs.to(device)
         caption_structures = caption_structures.to(device)
         caplen_structures = caplen_structures.to(device)
@@ -234,6 +237,7 @@ def train(train_loader, encoder, decoder_structure, decoder_cell, criterion_stru
         decoder_cell_optimizer.zero_grad()
         if encoder_optimizer is not None:
             encoder_optimizer.zero_grad()
+        print("backward..................")
         loss.backward(retain_graph=True)
         loss_structures.backward(retain_graph=True)
         loss_cells.backward()
