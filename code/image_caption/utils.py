@@ -18,8 +18,8 @@ def check_longest_cell(cells):
 
 def create_input_files(image_folder="pubtabnet", output_folder="output",
                        max_len_token_structure=300,
-                       max_len_token_cell=100, width_image=512,
-                       height_image=512):
+                       max_len_token_cell=100
+                       ):
     """
     Creates input files for training, validation, and test data.
 
@@ -71,6 +71,7 @@ def create_input_files(image_folder="pubtabnet", output_folder="output",
         caption_cells = []
         path = os.path.join("{}/{}".format(image_folder,
                                            img["split"]), img['filename'])
+        print("check_longgest_cell: {}".format(check_longest_cell(img["html"]["cells"])))
         if len(img["html"]["structure"]["tokens"]) <= max_len_token_structure and check_longest_cell(img["html"]["cells"]) <= max_len_token_cell:
             captions_structure.append(img["html"]["structure"]['tokens'])
             for cell in img["html"]["cells"]:
