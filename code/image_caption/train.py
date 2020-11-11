@@ -34,8 +34,8 @@ epochs_since_improvement = 0
 batch_size = 4
 
 workers = 1  # for data-loading; right now, only 1 works with h5py
-encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
-decoder_lr = 4e-4  # learning rate for decoder
+encoder_lr = 1e-3  # learning rate for encoder if fine-tuning
+decoder_lr = 4e-3  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
 alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as in the paper
 best_TED = 0.  # TED score right now
@@ -383,9 +383,13 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
                         html_predict_all += temp_preds[index_cell]
                         index_cell += 1
 
-                print("html_predict: ", html_predict_only_cell)
-                print("html_true: ", html_true)
-                print("html_predict_all: ", html_predict_all)
+                # print("html_predict: ", html_predict_only_cell)
+                # print("html_true: ", html_true)
+                # print("html_predict_all: ", html_predict_all)
+
+                html_predict_only_cell = create_html(html_predict_only_cell)
+                html_predict_all = create_html(html_predict_all)
+                html_true = create_html(html_true)
 
                 html_predict_only_cells.append(html_predict_only_cell)
                 html_predict_alls.append(html_predict_all)
@@ -413,6 +417,8 @@ def val(val_loader, encoder, decoder_structure, decoder_cell, criterion_structur
 
             scores_all = teds.batch_evaluate_html(
                 html_predict_alls, html_trues)
+
+            print("scores_only_cell: ", scores_only_cell)
 
             ted_score = np.mean(scores_only_cell)
             return ted_score

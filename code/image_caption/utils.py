@@ -295,6 +295,25 @@ def save_checkpoint(epoch, epochs_since_improvement, encoder, decoder_structure,
         torch.save(state, 'BEST_' + filename)
 
 
+def create_html(html_code):
+    return '''<html>
+                   <head>
+                   <meta charset="UTF-8">
+                   <style>
+                   table, th, td {
+                     border: 1px solid black;
+                     font-size: 10px;
+                   }
+                   </style>
+                   </head>
+                   <body>
+                   <table frame="hsides" rules="groups" width="100%%">
+                     %s
+                   </table>
+                   </body>
+                   </html>''' % html_code
+
+
 class AverageMeter(object):
     """
     Keeps track of most recent, average, sum, and count of a metric.
